@@ -1,15 +1,33 @@
-# Node / Next.js
+# ===== Node / Next.js =====
 node_modules/
 .next/
 out/
 
-# Python
+# ===== Python =====
 __pycache__/
+*.pyc
 .env
 venv/
+.venv/
 
-# Logs
+# ===== Databases =====
+*.db
+
+# ===== Logs =====
 *.log
 
-# OS files
+# ===== Uploads & Test Artifacts =====
+uploads/
+*.pdf
+*.txt
+
+# ===== Test & Debug Scripts =====
+test_*.py
+verify_*.py
+*_debug.py
+debug_*.py
+START_*.ps1
+START_*.md
+
+# ===== OS =====
 .DS_Store
