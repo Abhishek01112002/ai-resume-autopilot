@@ -31,25 +31,52 @@ async def upload_resume(
         if not file.filename.endswith(('.pdf', '.docx', '.doc')):
             raise HTTPException(status_code=400, detail="Only PDF and DOCX files are supported")
         
-        # Save file
-        file_path = UPLOAD_DIR / f"{current_user.id}_{file.filename}"
-        with open(file_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
+        # --- CLOUDINARY UPLOAD ---
+        import cloudinary
+        import cloudinary.uploader
         
-        # Parse resume
-        parser = ResumeParser()
+        cloudinary_url = None
+        # Configure Cloudinary (expecting env vars: CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET)
+        if os.getenv("CLOUDINARY_CLOUD_NAME"):
+            try:
+                cloudinary.config(
+                    cloud_name=os.getenv("CLOUDINARY_CLOUD_NAME"),
+                    api_key=os.getenv("CLOUDINARY_API_KEY"),
+                    api_secret=os.getenv("CLOUDINARY_API_SECRET")
+                )
+                
+                # Upload directly from file stream
+                upload_result = cloudinary.uploader.upload(file.file, resource_type="raw", public_id=f"resumes/{current_user.id}_{file.filename}")
+                cloudinary_url = upload_result.get("secure_url")
+                # Reset file cursor for local parsing
+                await file.seek(0)
+            except Exception as e:
+                print(f"Cloudinary upload failed: {e}")
+                # Don't fail the whole request, just proceed without cloud URL or fallback
+        
+        # --- LOCAL PARSING (For parsing logic) ---
+        # We still need a temp file for parsing libraries (PyPDF2/docx) which often require file paths
+        # In Vercel, /tmp is writable
+        import tempfile
+        
+        with tempfile.NamedTemporaryFile(delete=False, suffix=Path(file.filename).suffix) as tmp_file:
+            shutil.copyfileobj(file.file, tmp_file)
+            tmp_path = tmp_file.name
+        
         try:
-            parsed_data = parser.parse_resume(str(file_path))
-        except Exception as e:
-            if os.path.exists(file_path):
-                os.remove(file_path)
-            raise HTTPException(status_code=400, detail=f"Error parsing resume: {str(e)}")
-        
+            # Parse resume
+            parser = ResumeParser()
+            parsed_data = parser.parse_resume(tmp_path)
+        finally:
+            # Cleanup temp file
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+                
         # Save to database
         resume = Resume(
             user_id=current_user.id,
             original_filename=file.filename,
-            original_file_path=str(file_path),
+            original_file_path=cloudinary_url if cloudinary_url else "local_storage_not_supported_on_vercel", 
             category=category,
             parsed_data=parsed_data,
             ats_score=parsed_data.get("ats_score", 0),
@@ -71,12 +98,10 @@ async def upload_resume(
         user_profile.technical_skills = list(existing_skills.union(new_skills))
         
         # Update experience (append if not exists - simplified logic)
-        # Ideally checking deeper equality, but appending for now if empty
         if parsed_data.get("experience"):
              if not user_profile.experience:
                  user_profile.experience = parsed_data["experience"]
              else:
-                 # simple append for now
                  current_exp = user_profile.experience or []
                  current_exp.extend(parsed_data["experience"])
                  user_profile.experience = current_exp

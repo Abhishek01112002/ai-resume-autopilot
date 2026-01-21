@@ -1,40 +1,45 @@
-from sqlalchemy import create_engine
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
 import os
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker, declarative_base
 from dotenv import load_dotenv
 
-load_dotenv()
+# Robust .env loading
+current_dir = os.path.dirname(os.path.abspath(__file__))
+root_dir = os.path.dirname(current_dir)
+dotenv_paths = [os.path.join(current_dir, ".env"), os.path.join(root_dir, ".env"), ".env"]
 
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./resume_app.db")
+for path in dotenv_paths:
+    if os.path.exists(path):
+        load_dotenv(path, override=True)
+        break
 
-if DATABASE_URL.startswith("sqlite"):
-    engine = create_engine(
-        DATABASE_URL, connect_args={"check_same_thread": False}
-    )
-else:
-    engine = create_engine(DATABASE_URL)
+DATABASE_URL = os.getenv("DATABASE_URL")
 
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+if not DATABASE_URL:
+    raise RuntimeError("DATABASE_URL is not set")
+
+# Fix for providers that use postgres://
+if DATABASE_URL.startswith("postgres://"):
+    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+
+engine = create_engine(
+    DATABASE_URL,
+    pool_pre_ping=True
+)
+
+SessionLocal = sessionmaker(
+    autocommit=False,
+    autoflush=False,
+    bind=engine
+)
 
 Base = declarative_base()
 
-# Dependency to get database session
+# Dependency
 def get_db():
-    print("DEBUG: Connecting to database...")
+    db = SessionLocal()
     try:
-        db = SessionLocal()
-        print("DEBUG: Database session created.")
         yield db
-    except Exception as e:
-        print(f"DEBUG: Database Error: {e}")
-        raise
     finally:
-        print("DEBUG: Closing database session.")
-        try:
-            db.close()
-        except UnboundLocalError:
-            pass
-        except Exception as e:
-            print(f"DEBUG: Error closing database: {e}")
+        db.close()
 
